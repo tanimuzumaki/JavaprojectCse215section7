@@ -1,4 +1,4 @@
-public class project{
+public class ECommerceWebsite{
 public static void main(String[] args){
 
 }
