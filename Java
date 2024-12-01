@@ -1,5 +1,325 @@
-public class ECommerceWebsite{
-public static void main(String[] args){
+package oop;
 
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+class Product implements Serializable {
+    private String name;
+    private double price;
+    private int stock;
+
+    public Product(String name, double price, int stock) {
+        this.name = name;
+        this.price = price;
+        this.stock = stock;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public double getPrice() {
+        return price;
+    }
+
+    public int getStock() {
+        return stock;
+    }
+
+    public synchronized void reduceStock(int quantity) throws Exception {
+        if (quantity > stock) {
+            throw new Exception("Not enough stock available for " + name);
+        }
+        stock -= quantity;
+    }
+
+    public synchronized void increaseStock(int quantity) {
+        stock += quantity;
+    }
+
+    @Override
+    public String toString() {
+        return name + " - $" + price + " (Stock: " + stock + ")";
+    }
 }
+
+class ShoppingCart {
+    private Map<Product, Integer> cart;
+
+    public ShoppingCart() {
+        cart = new HashMap<>();
+    }
+
+    public synchronized void addProduct(Product product, int quantity) throws Exception {
+        if (quantity > product.getStock()) {
+            throw new Exception("Not enough stock available for " + product.getName());
+        }
+        cart.put(product, cart.getOrDefault(product, 0) + quantity);
+        product.reduceStock(quantity);
+    }
+
+    public synchronized void removeProduct(Product product) {
+        if (cart.containsKey(product)) {
+            int quantity = cart.get(product);
+            product.increaseStock(quantity);
+            cart.remove(product);
+        }
+    }
+
+    public synchronized double calculateTotal() {
+        double total = 0.0;
+        for (Map.Entry<Product, Integer> entry : cart.entrySet()) {
+            total += entry.getKey().getPrice() * entry.getValue();
+        }
+        return total;
+    }
+
+    public synchronized String displayCart() {
+        StringBuilder sb = new StringBuilder();
+        if (cart.isEmpty()) {
+            return "Cart is empty!";
+        }
+        for (Map.Entry<Product, Integer> entry : cart.entrySet()) {
+            sb.append(entry.getKey().getName())
+                    .append(" - Quantity: ").append(entry.getValue())
+                    .append(" - Subtotal: $").append(entry.getKey().getPrice() * entry.getValue())
+                    .append("\n");
+        }
+        return sb.toString();
+    }
+
+    public synchronized void clearCart() {
+        cart.clear();
+    }
+}
+
+public class OnlineShoppingSystem extends JFrame {
+    private static final String PRODUCT_FILE = "products.dat";
+    public static List<Product> products = new ArrayList<>();
+    private ShoppingCart cart;
+    private JTextArea productArea, cartArea;
+    private boolean isAdmin = false;
+    private ExecutorService executorService;
+
+    public OnlineShoppingSystem(boolean adminMode) {
+        cart = new ShoppingCart();
+        executorService = Executors.newFixedThreadPool(5);
+        isAdmin = adminMode;
+
+        loadProductsFromFile(); 
+
+      
+        setTitle(isAdmin ? "Admin Panel - Online Shopping System" : "Online Shopping System");
+        setSize(900, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLayout(new BorderLayout());
+
+        
+        productArea = new JTextArea(15, 40);
+        updateProductArea();
+        productArea.setEditable(false);
+        JScrollPane productScrollPane = new JScrollPane(productArea);
+
+        
+        cartArea = new JTextArea(15, 40);
+        cartArea.setEditable(false);
+        JScrollPane cartScrollPane = new JScrollPane(cartArea);
+
+        
+        JPanel buttonPanel = new JPanel(new GridLayout(2, 3, 10, 10));
+        if (isAdmin) {
+            JButton addProductButton = new JButton("Add Product");
+            JButton removeProductButton = new JButton("Remove Product");
+            JButton searchProductButton = new JButton("Search Product");
+
+            buttonPanel.add(addProductButton);
+            buttonPanel.add(removeProductButton);
+            buttonPanel.add(searchProductButton);
+
+            addProductButton.addActionListener(e -> addProduct());
+            removeProductButton.addActionListener(e -> removeProduct());
+            searchProductButton.addActionListener(e -> searchProduct());
+        } else {
+            JButton addToCartButton = new JButton("Add to Cart");
+            JButton removeFromCartButton = new JButton("Remove from Cart");
+            JButton checkoutButton = new JButton("Checkout");
+            JButton searchProductButton = new JButton("Search Product");
+            JButton viewCartButton = new JButton("View Cart");
+
+            buttonPanel.add(addToCartButton);
+            buttonPanel.add(removeFromCartButton);
+            buttonPanel.add(checkoutButton);
+            buttonPanel.add(searchProductButton);
+            buttonPanel.add(viewCartButton);
+
+            addToCartButton.addActionListener(e -> addToCart());
+            removeFromCartButton.addActionListener(e -> removeFromCart());
+            checkoutButton.addActionListener(e -> checkout());
+            searchProductButton.addActionListener(e -> searchProduct());
+            viewCartButton.addActionListener(e -> updateCartArea());
+        }
+
+        
+        JPanel centerPanel = new JPanel(new GridLayout(1, 2, 20, 20));
+        centerPanel.add(productScrollPane);
+        centerPanel.add(cartScrollPane);
+
+        add(new JLabel("Available Products:", SwingConstants.CENTER), BorderLayout.NORTH);
+        add(centerPanel, BorderLayout.CENTER);
+        add(buttonPanel, BorderLayout.SOUTH);
+
+        setVisible(true);
+    }
+
+    private void updateProductArea() {
+        productArea.setText("");
+        for (Product product : products) {
+            productArea.append(product.toString() + "\n");
+        }
+    }
+
+    private void updateCartArea() {
+        cartArea.setText(cart.displayCart());
+    }
+
+    private void addToCart() {
+        String productName = JOptionPane.showInputDialog(this, "Enter product name:");
+        String quantityStr = JOptionPane.showInputDialog(this, "Enter quantity:");
+        try {
+            int quantity = Integer.parseInt(quantityStr);
+            executorService.submit(() -> {
+                for (Product product : products) {
+                    if (product.getName().equalsIgnoreCase(productName)) {
+                        try {
+                            cart.addProduct(product, quantity);
+                            saveProductsToFile(); 
+                            SwingUtilities.invokeLater(() -> {
+                                updateProductArea();
+                                updateCartArea();
+                            });
+                        } catch (Exception e) {
+                            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, e.getMessage()));
+                        }
+                        return;
+                    }
+                }
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Product not found!"));
+            });
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Invalid quantity!");
+        }
+    }
+
+    private void removeFromCart() {
+        String productName = JOptionPane.showInputDialog(this, "Enter product name to remove:");
+        executorService.submit(() -> {
+            for (Product product : products) {
+                if (product.getName().equalsIgnoreCase(productName)) {
+                    cart.removeProduct(product);
+                    saveProductsToFile(); 
+                    SwingUtilities.invokeLater(() -> {
+                        updateProductArea();
+                        updateCartArea();
+                    });
+                    return;
+                }
+            }
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Product not found in cart!"));
+        });
+    }
+
+    private void checkout() {
+        executorService.submit(() -> {
+            double total = cart.calculateTotal();
+            SwingUtilities.invokeLater(() -> {
+                JOptionPane.showMessageDialog(this, "Order placed successfully! Total: $" + total);
+                cart.clearCart();
+                updateCartArea();
+            });
+        });
+    }
+
+    private void addProduct() {
+        String name = JOptionPane.showInputDialog(this, "Enter product name:");
+        String priceStr = JOptionPane.showInputDialog(this, "Enter product price:");
+        String stockStr = JOptionPane.showInputDialog(this, "Enter product stock:");
+        try {
+            double price = Double.parseDouble(priceStr);
+            int stock = Integer.parseInt(stockStr);
+            Product newProduct = new Product(name, price, stock);
+            products.add(newProduct);
+            saveProductsToFile(); 
+            SwingUtilities.invokeLater(this::updateProductArea);
+            JOptionPane.showMessageDialog(this, "Product added successfully!");
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Invalid price or stock input!");
+        }
+    }
+
+    private void removeProduct() {
+        String name = JOptionPane.showInputDialog(this, "Enter product name to remove:");
+        products.removeIf(product -> product.getName().equalsIgnoreCase(name));
+        saveProductsToFile(); 
+        SwingUtilities.invokeLater(this::updateProductArea);
+        JOptionPane.showMessageDialog(this, "Product removed successfully!");
+    }
+
+    private void searchProduct() {
+        String name = JOptionPane.showInputDialog(this, "Enter product name to search:");
+        StringBuilder sb = new StringBuilder();
+        for (Product product : products) {
+            if (product.getName().toLowerCase().contains(name.toLowerCase())) {
+                sb.append(product.toString()).append("\n");
+            }
+        }
+        if (sb.length() == 0) {
+            sb.append("No products found!");
+        }
+        JOptionPane.showMessageDialog(this, sb.toString());
+    }
+
+    private void loadProductsFromFile() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(PRODUCT_FILE))) {
+            products = (List<Product>) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            
+            if (products.isEmpty()) {
+                products.add(new Product("Laptop", 999.99, 10));
+                products.add(new Product("Smartphone", 699.99, 20));
+                products.add(new Product("Headphones", 49.99, 50));
+                products.add(new Product("Keyboard", 19.99, 100));
+                products.add(new Product("Monitor", 199.99, 30));
+                products.add(new Product("Mouse", 29.99, 200));
+                products.add(new Product("Smartwatch", 129.99, 40));
+                products.add(new Product("Tablet", 249.99, 15));
+            }
+        }
+    }
+
+    private void saveProductsToFile() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(PRODUCT_FILE))) {
+            oos.writeObject(products);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Error saving product data!");
+        }
+    }
+
+    public static void main(String[] args) {
+        String mode = JOptionPane.showInputDialog(null, "Enter Mode (Admin/Customer):");
+        if (mode.equalsIgnoreCase("Admin")) {
+            new OnlineShoppingSystem(true);
+        } else if (mode.equalsIgnoreCase("Customer")) {
+            new OnlineShoppingSystem(false);
+        } else {
+            JOptionPane.showMessageDialog(null, "Invalid Mode!");
+        }
+    }
 }
